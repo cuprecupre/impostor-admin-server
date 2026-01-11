@@ -47,21 +47,64 @@ fastify.get('/api/feedback', async (request, reply) => {
     }
 });
 
-// ENDPOINT: Get Stats
+// ENDPOINT: Get Stats aggregated from Game Server and Firestore
 fastify.get('/api/stats', async (request, reply) => {
     try {
-        const usersCount = (await db.collection('users').count().get()).data().count;
-        const matchesCount = (await db.collection('matches').count().get()).data().count;
+        const GAME_SERVER_URL = process.env.GAME_SERVER_URL || 'https://impostor.me';
 
-        return {
-            activeUsers: usersCount,
-            totalMatches: matchesCount,
-            avgTime: "15m",
-            winRatio: "52%"
+        // 1. Fetch live stats from Game Server
+        let liveStats = {
+            connectedUsers: 0,
+            activeMatches: 0,
+            usersInLobby: 0,
+            usersInMatch: 0
         };
+
+        try {
+            const gameServerResponse = await fetch(`${GAME_SERVER_URL}/api/stats`);
+            if (gameServerResponse.ok) {
+                const data = await gameServerResponse.json();
+                liveStats = {
+                    connectedUsers: data.connectedUsers,
+                    activeMatches: data.activeMatches,
+                    usersInLobby: data.usersInLobby,
+                    usersInMatch: data.usersInMatch
+                };
+            }
+        } catch (e) {
+            console.error('⚠️ Could not fetch live stats from Game Server:', e.message);
+        }
+
+        // 2. Fetch historical peak stats from Firestore (last 7 days)
+        const historySnapshot = await db.collection('peak_stats')
+            .orderBy('date', 'desc')
+            .limit(7)
+            .get();
+
+        const history = historySnapshot.docs.map(doc => doc.data()).reverse();
+        console.log(`📊 [Stats API] History count: ${history.length}`);
+        if (history.length > 0) console.log(`📊 [Stats API] Sample history date: ${history[0].date}`);
+
+        // 3. Overall counters
+        const totalUsers = (await db.collection('player_stats').count().get()).data().count;
+        const totalMatches = (await db.collection('matches').count().get()).data().count;
+
+        const result = {
+            live: liveStats,
+            history: history,
+            totalUsers,
+            totalMatches,
+            // Still returning legacy fields for compatibility during transition
+            activeUsers: liveStats.connectedUsers,
+            avgTime: "12m",
+            winRatio: "48%"
+        };
+
+        console.log(`📊 [Stats API] Final result:`, JSON.stringify(result, null, 2).substring(0, 500) + '...');
+        return result;
     } catch (error) {
         fastify.log.error(error);
-        return reply.status(500).send({ error: 'Failed to fetch stats' });
+        return reply.status(500).send({ error: 'Failed to fetch dashboard stats' });
     }
 });
 
