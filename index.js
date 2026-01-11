@@ -31,7 +31,6 @@ fastify.get('/api/feedback', async (request, reply) => {
     try {
         const snapshot = await db.collection('feedback')
             .orderBy('createdAt', 'desc')
-            .limit(50)
             .get();
 
         const feedback = snapshot.docs.map(doc => ({
